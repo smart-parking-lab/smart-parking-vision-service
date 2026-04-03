@@ -1,62 +1,89 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from lpr import router
+import asyncio
 import logging
 import time
-
 import sys
+import signal
+from mqtt_client import MQTTClient
+from gate_handler import handle_gate_event
+from database import database
 
-# Cấu hình format log để dễ đọc, có căn lề level
-logger = logging.getLogger("custom_api_logger")
+# ========== Cấu hình Logger ==========
+logger = logging.getLogger("worker_main")
 logger.setLevel(logging.INFO)
-# Xóa các handler cũ nếu có khi reload
 if logger.hasHandlers():
     logger.handlers.clear()
 handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s", "%Y-%m-%d %H:%M:%S"))
 logger.addHandler(handler)
-# Không lan truyền log lên root logger (không bị in đúp bởi uvicorn)
 logger.propagate = False
 
-app = FastAPI(
-    title="Parking LPR Service",
-    description="Microservice for License Plate Recognition",
-    version="1.0.0"
-)
+# Thiết lập level cho các module con
+for module_name in ("mqtt_client", "camera_service", "gate_handler"):
+    sub_logger = logging.getLogger(module_name)
+    sub_logger.setLevel(logging.INFO)
+    if not sub_logger.handlers:
+        sub_logger.addHandler(handler)
+    sub_logger.propagate = False
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Cờ để duy trì tiến trình chạy nền
+keep_running = True
 
-@app.middleware("http")
-async def log_requests_middleware(request: Request, call_next):
-    start_time = time.time()
-    logger.info(f"==> [REQ_IN]  {request.method} {request.url.path}")
+def handle_exit(sig, frame):
+    global keep_running
+    logger.info(f"🛑 Nhận tín hiệu ngắt vòng lặp (signal {sig}). Đang dừng graceful...")
+    keep_running = False
+
+async def main():
+    global keep_running
     
-    response = await call_next(request)
-    
-    process_time = time.time() - start_time
-    logger.info(f"<== [REQ_OUT] {request.method} {request.url.path} | STATUS: {response.status_code} | T/g: {process_time:.3f}s")
-    return response
+    # Catch SIGINT (Ctrl+C) and SIGTERM
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
 
-app.include_router(router, prefix="/api/v1")
+    # 1. Kết nối DB
+    try:
+        await database.connect()
+        logger.info("✅ Database đã kết nối")
+    except Exception as e:
+        logger.error(f"❌ Không thể kết nối Database: {e}")
+        return
 
-@app.get("/health")
-def health_check():
-    """
-    Kiểm tra trạng thái hoạt động của service.
-    """
-    return {
-        "status": "active", 
-        "service": "parking-lpr-service",
-        "description": "API nhận diện biển số xe sử dụng PaddleOCR"
-    }
+    # Lấy event loop
+    loop = asyncio.get_running_loop()
+
+    # 2. Khởi tạo và kết nối MQTT
+    mqtt_client = None
+    try:
+        def on_gate(gate: str, status: str):
+            handle_gate_event(gate, status, mqtt_client, loop)
+
+        mqtt_client = MQTTClient(on_gate_event=on_gate)
+        mqtt_client.connect()
+        logger.info("✅ MQTT client worker đã khởi tạo")
+        
+        # 3. Vòng lặp duy trì tiến trình sống
+        logger.info("🚀 LPR MQTT Worker đang chạy. Nhấn Ctrl+C để thoát.")
+        while keep_running:
+            await asyncio.sleep(1)
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi runtime trong main loop: {e}")
+    finally:
+        # --- Cleanup ---
+        if mqtt_client:
+            mqtt_client.disconnect()
+            logger.info("🔌 Đã ngắt kết nối MQTT")
+        
+        if database.is_connected:
+            await database.disconnect()
+            logger.info("🔌 Đã ngắt kết nối DB")
+            
+        logger.info("👋 Worker đã thoát.")
 
 if __name__ == "__main__":
-    import uvicorn
-    # Chạy service trên port 8000
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # Trên Windows có thể gặp lỗi ValueError: set_wakeup_fd only works in main thread
+    # với một số sự kiện signal, tuy nhiên ProactorEventLoop tự xử lý khá tốt khi dùng loop.run_until_complete()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
