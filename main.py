@@ -1,11 +1,9 @@
 import asyncio
 import logging
-import time
 import sys
 import signal
 from mqtt_client import MQTTClient
 from gate_handler import handle_gate_event
-from database import database
 
 # ========== Cấu hình Logger ==========
 logger = logging.getLogger("worker_main")
@@ -18,7 +16,7 @@ logger.addHandler(handler)
 logger.propagate = False
 
 # Thiết lập level cho các module con
-for module_name in ("mqtt_client", "camera_service", "gate_handler"):
+for module_name in ("mqtt_client", "camera_service", "gate_handler", "parking_api_client"):
     sub_logger = logging.getLogger(module_name)
     sub_logger.setLevel(logging.INFO)
     if not sub_logger.handlers:
@@ -40,18 +38,10 @@ async def main():
     signal.signal(signal.SIGINT, handle_exit)
     signal.signal(signal.SIGTERM, handle_exit)
 
-    # 1. Kết nối DB
-    try:
-        await database.connect()
-        logger.info("✅ Database đã kết nối")
-    except Exception as e:
-        logger.error(f"❌ Không thể kết nối Database: {e}")
-        return
-
     # Lấy event loop
     loop = asyncio.get_running_loop()
 
-    # 2. Khởi tạo và kết nối MQTT
+    # Khởi tạo và kết nối MQTT
     mqtt_client = None
     try:
         def on_gate(gate: str, status: str):
@@ -61,7 +51,7 @@ async def main():
         mqtt_client.connect()
         logger.info("✅ MQTT client worker đã khởi tạo")
         
-        # 3. Vòng lặp duy trì tiến trình sống
+        # Vòng lặp duy trì tiến trình sống
         logger.info("🚀 LPR MQTT Worker đang chạy. Nhấn Ctrl+C để thoát.")
         while keep_running:
             await asyncio.sleep(1)
@@ -73,16 +63,10 @@ async def main():
         if mqtt_client:
             mqtt_client.disconnect()
             logger.info("🔌 Đã ngắt kết nối MQTT")
-        
-        if database.is_connected:
-            await database.disconnect()
-            logger.info("🔌 Đã ngắt kết nối DB")
             
         logger.info("👋 Worker đã thoát.")
 
 if __name__ == "__main__":
-    # Trên Windows có thể gặp lỗi ValueError: set_wakeup_fd only works in main thread
-    # với một số sự kiện signal, tuy nhiên ProactorEventLoop tự xử lý khá tốt khi dùng loop.run_until_complete()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

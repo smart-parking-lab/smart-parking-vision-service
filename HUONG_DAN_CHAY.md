@@ -1,12 +1,10 @@
 # HƯỚNG DẪN CHẠY
 
 ## BƯỚC 1: Cài đặt (Chỉ làm 1 lần)
-Mở Terminal tại thư mục `parking-lpr`:
-```bash
+
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
-```
 
 ## BƯỚC 2: Cấu hình hệ thống
 Kiểm tra và sửa thông tin trong file `.env`:

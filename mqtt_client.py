@@ -10,7 +10,7 @@ load_dotenv()
 logger = logging.getLogger("mqtt_client")
 
 # Cấu hình MQTT từ .env
-MQTT_BROKER = os.getenv("MQTT_BROKER", "broker.hivemq.com")
+MQTT_BROKER = os.getenv("MQTT_BROKER", "broker.hivemq.com").replace("mqtt://", "")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_CLIENT_ID = os.getenv("MQTT_CLIENT_ID", "be1_lpr")
 
