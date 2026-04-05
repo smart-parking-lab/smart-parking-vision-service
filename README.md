@@ -1,38 +1,48 @@
-# KIẾN TRÚC HỆ THỐNG PARKING LPR (WORKER)
+# Smart Parking System — BE Core
 
-System LPR hiện tại hoạt động theo kiến trúc **MOM (Message-Oriented Middleware)** bằng giao thức **MQTT**, không sử dụng REST API truyền thống.
+Hệ thống điều vận trung tâm (Central Business Logic) cho giải pháp Bãi đỗ xe thông minh. BE Core đóng vai trò là "bộ não" điều phối tín hiệu giữa phần cứng (ESP32), AI nhận diện (BE LPR) và giao diện quản lý (Dashboard).
 
-## 1. Cấu trúc Thư Mục
+## 🏗 Kiến trúc Hệ thống
+Dự án được xây dựng dựa trên kiến trúc **Event-Driven** (MQTT) kết hợp **REST API** (FastAPI):
+- **MQTT**: Lắng nghe sensors (vào/ra/đỗ) và điều khiển thiết bị (Barrier).
+- **FastAPI**: Cung cấp API trực tiếp cho Dashboard đọc dữ liệu từ Database.
+- **SQLAlchemy**: Quản lý trực tiếp Database Supabase Postgres.
+- **Service Layer**: Tách biệt logic kinh doanh (Tính tiền, Quản lý phiên đỗ xe).
 
+## 📁 Cấu trúc Thư mục
 ```text
-parking-lpr/
-├── main.py              # Đóng vai trò là Worker Event Loop, giữ file cấu trúc sống
-├── gate_handler.py      # Bộ não trung tâm: Điều phối Camera -> AI OCR -> Logic tính toán DB -> Giao task xuống MQTT Command
-├── mqtt_client.py       # Nhiệm vụ giao tiếp Mạng với Trạm phần cứng (ESP32)
-├── camera_service.py    # Nhiệm vụ giao tiếp (HTTP) lấy hình qua camera điện thoại di động
-├── lpr_service.py       # Lõi AI (PaddleOCR module) giúp bóc tách chữ từ ảnh
-├── database.py          # Kết nối Database Supabase
-├── mock_esp32.py        # Kịch bản kĩ thuật số mô phỏng Tín hiệu phần cứng (dành cho Test)
-├── test-images/         # Kho ảnh Backup dùng khi IP Camera offline
-└── requirements.txt
+src/app/
+├── api/             # Các Endpoint FastAPI (Sessions, Invoices, Slots)
+├── core/            # Cấu hình trung tâm (Database, Config, CORS)
+├── models/          # Định nghĩa Database Models (SQLAlchemy)
+├── mqtt/            # Client MQTT và Router xử lý sự kiện
+├── services/        # Logic nghiệp vụ (Gate, Payment, Slot, Pricing, LPR Client)
+└── utils/           # Tiện ích chung (Logger)
+main.py              # Entry point tập trung (Chạy đồng thời FastAPI + MQTT)
+requirements.txt     # Danh sách thư viện ổn định (Paddle 2.6.x)
+tests/               # Các script giả lập phần cứng và AI để testing
 ```
 
-## 2. Luồng chạy Thực Tế (Data Flow)
+## 🛠 Cài đặt & Chạy bản Test
+Xem hướng dẫn chi tiết tại [HUONG_DAN_CHAY.md](./HUONG_DAN_CHAY.md).
 
-```mermaid
-sequenceDiagram
-    participant ESP32 (Harware)
-    participant Worker (Backend LPR)
-    participant Phone Camera
+1. **Cài đặt thư viện**:
+   ```powershell
+   pip install -r requirements.txt
+   ```
 
-    ESP32 (Harware)->>Worker (Backend LPR): 1. MQTT Signal (Có xe tại GATE)
-    Worker (Backend LPR)->>Phone Camera: 2. GET /shot.jpg (Bắt ảnh)
-    Phone Camera-->>Worker (Backend LPR): 3. Raw Bytes Image (Lỗi -> Lấy file có sẵn)
-    note right of Worker (Backend LPR): 4. Trích xuất Text (LPR Service)
-    note right of Worker (Backend LPR): 5. Ghi vào CSDL Supabase
-    Worker (Backend LPR)->>ESP32 (Harware): 6. Trả lại MQTT (OPEN_GATE/PAYMENT)
-```
+2. **Cấu hình môi trường**:
+   Kiểm tra file `.env` đã có đúng `DATABASE_URL` của Supabase.
 
-## 3. Quản lý Life-Cycle
-- Vì hệ thống xoá bỏ FastAPI, Vòng lặp chính của ứng dụng được duy trì thông qua `asyncio.sleep(1)` tại `main.py`.
-- Tầng CSDL (Database) cũng được cấu hình Non-blocking (async) nhằm không che khuất luồng bắt hình thời gian thực của Camera.
+3. **Khởi chạy hệ thống**:
+   ```powershell
+   python main.py
+   ```
+
+## 📡 MQTT Topics
+- **Sensors Input**: `ptithcm_2022/smart_parking/sensors` (Lắng nghe từ ESP32)
+- **Control Output**: `ptithcm_2022/smart_parking/control` (Gửi lệnh mở Barrier/Thanh toán)
+
+---
+**Author**: Antigravity AI Assistant
+**Status**: Refactored & Optimized (2026-04-05)

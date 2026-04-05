@@ -1,70 +1,77 @@
-import asyncio
-import logging
 import sys
+import asyncio
 import signal
-from mqtt_client import MQTTClient
-from gate_handler import handle_gate_event
+from pathlib import Path
 
-# ========== Cấu hình Logger ==========
-logger = logging.getLogger("worker_main")
-logger.setLevel(logging.INFO)
-if logger.hasHandlers():
-    logger.handlers.clear()
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s", "%Y-%m-%d %H:%M:%S"))
-logger.addHandler(handler)
-logger.propagate = False
+# Thêm src vào module path
+src_path = Path(__file__).parent / "src"
+sys.path.append(str(src_path))
 
-# Thiết lập level cho các module con
-for module_name in ("mqtt_client", "camera_service", "gate_handler", "parking_api_client"):
-    sub_logger = logging.getLogger(module_name)
-    sub_logger.setLevel(logging.INFO)
-    if not sub_logger.handlers:
-        sub_logger.addHandler(handler)
-    sub_logger.propagate = False
+import uvicorn
+from app.main import app
+from app.utils.logger import setup_logging, get_logger
+from app.mqtt.client import MQTTClient
+from app.mqtt.handlers import init_handlers, route_message
+from app.core.config import SERVER_HOST, SERVER_PORT
 
-# Cờ để duy trì tiến trình chạy nền
-keep_running = True
+logger = get_logger("be_core")
 
-def handle_exit(sig, frame):
-    global keep_running
-    logger.info(f"🛑 Nhận tín hiệu ngắt vòng lặp (signal {sig}). Đang dừng graceful...")
-    keep_running = False
+# Cờ duy trì vòng lặp
+_keep_running = True
+
+
+def _handle_exit(sig, frame):
+    global _keep_running
+    logger.info(f"🛑 Nhận tín hiệu thoát (signal {sig}). Đang dừng...")
+    _keep_running = False
+
 
 async def main():
-    global keep_running
-    
-    # Catch SIGINT (Ctrl+C) and SIGTERM
-    signal.signal(signal.SIGINT, handle_exit)
-    signal.signal(signal.SIGTERM, handle_exit)
+    global _keep_running
 
-    # Lấy event loop
+    setup_logging()
+
+    signal.signal(signal.SIGINT, _handle_exit)
+    signal.signal(signal.SIGTERM, _handle_exit)
+
     loop = asyncio.get_running_loop()
 
-    # Khởi tạo và kết nối MQTT
-    mqtt_client = None
+    # === Khởi tạo MQTT ===
+    mqtt_client = MQTTClient(on_message_callback=route_message)
+    init_handlers(mqtt_client, loop)
+    mqtt_client.connect()
+    logger.info("✅ MQTT client đã khởi tạo")
+
+    # === Khởi tạo FastAPI (chạy uvicorn trên thread riêng) ===
+    config = uvicorn.Config(
+        app,
+        host=SERVER_HOST,
+        port=SERVER_PORT,
+        log_level="info",
+    )
+    server = uvicorn.Server(config)
+
+    # Chạy uvicorn trong task riêng
+    server_task = asyncio.create_task(server.serve())
+
+    logger.info("=" * 55)
+    logger.info("🚀 BE Core — Smart Parking đang chạy!")
+    logger.info(f"   📡 MQTT: Đang lắng nghe sensors từ ESP32")
+    logger.info(f"   🌐 API:  http://{SERVER_HOST}:{SERVER_PORT}")
+    logger.info(f"   📚 Docs: http://{SERVER_HOST}:{SERVER_PORT}/docs")
+    logger.info("=" * 55)
+
     try:
-        def on_gate(gate: str, status: str):
-            handle_gate_event(gate, status, mqtt_client, loop)
-
-        mqtt_client = MQTTClient(on_gate_event=on_gate)
-        mqtt_client.connect()
-        logger.info("✅ MQTT client worker đã khởi tạo")
-        
-        # Vòng lặp duy trì tiến trình sống
-        logger.info("🚀 LPR MQTT Worker đang chạy. Nhấn Ctrl+C để thoát.")
-        while keep_running:
+        # Chờ cho đến khi có tín hiệu thoát
+        while _keep_running:
             await asyncio.sleep(1)
-
-    except Exception as e:
-        logger.error(f"❌ Lỗi runtime trong main loop: {e}")
     finally:
-        # --- Cleanup ---
-        if mqtt_client:
-            mqtt_client.disconnect()
-            logger.info("🔌 Đã ngắt kết nối MQTT")
-            
-        logger.info("👋 Worker đã thoát.")
+        # Cleanup
+        server.should_exit = True
+        await server_task
+        mqtt_client.disconnect()
+        logger.info("👋 BE Core đã thoát.")
+
 
 if __name__ == "__main__":
     try:

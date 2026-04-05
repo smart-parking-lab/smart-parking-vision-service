@@ -1,29 +1,30 @@
-# HƯỚNG DẪN CHẠY
+# 🚀 Hướng Dẫn Chạy BE Core
 
-## BƯỚC 1: Cài đặt (Chỉ làm 1 lần)
+Mở 3 Terminal song song theo thứ tự sau:
 
-python -m venv venv
+### 1. Terminal 1: BE Core (Port 8000)
+```powershell
 .\venv\Scripts\activate
-pip install -r requirements.txt
-
-## BƯỚC 2: Cấu hình hệ thống
-Kiểm tra và sửa thông tin trong file `.env`:
-- `IP_CAMERA`: Đặt IP của App điện thoại. Nếu không có đt, giữ nguyên (hệ thống tự lấy ảnh mẫu để test).
-- `DATABASE_URL`: Cấu hình Postgres (Supabase).
-- `MQTT_CLIENT_ID`: Độc nhất (Không trùng chéo với ai).
-
-## BƯỚC 3: Chạy Worker CHÍNH
-```bash
 python main.py
 ```
-*(Tiến trình sẽ treo liên tục ở nền để đợi lệnh. Nhấn Ctrl+C để tắt).*
+
+### 2. Terminal 2: Mock LPR (Port 8001)
+```powershell
+.\venv\Scripts\activate
+python tests/mock_lpr.py
+```
+
+### 3. Terminal 3: Mock Hardware (MQTT Test)
+```powershell
+.\venv\Scripts\activate
+python tests/mock_hw.py
+```
 
 ---
+## 🛠 Quy trình Test hoàn chỉnh:
+1. **Xe vào**: Terminal 3 bấm **1**. Kiểm tra log Terminal 1 & 2.
+2. **Xe đỗ**: Terminal 3 bấm **3**. Kiểm tra Slot tại `http://localhost:8000/api/v1/parking-slots`.
+3. **Xe ra**: Terminal 3 bấm **2**. Xem `invoice_id` ở log Terminal 1.
+4. **Thanh toán**: Terminal 3 bấm **5**, dán `invoice_id` và `session_id` để mở Barrier.
 
-## BƯỚC TEST (Khi không có trạm quét xe thật)
-Mở Terminal mới (#2) và giả vờ làm xe đi qua cổng:
-```bash
-.\venv\Scripts\activate
-python mock_esp32.py
-```
--> Theo dõi Terminal 1 xem DB được lưu và Barrier được mở ra sao.
+**API Docs**: http://localhost:8000/docs
