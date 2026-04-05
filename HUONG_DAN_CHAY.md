@@ -1,30 +1,29 @@
-# 🚀 Hướng Dẫn Chạy BE Core
+# 🚀 Hướng Dẫn Chạy Smart Parking (2 Terminal Mode)
 
-Mở 3 Terminal song song theo thứ tự sau:
+Hệ thống đã được thiết kế lại theo ý bạn: **Gọn nhẹ nhưng vẫn chuẩn kiến trúc**.
 
-### 1. Terminal 1: BE Core (Port 8000)
+### 1. Terminal 1: Backend Hub (Core + LPR + AI)
 ```powershell
 .\venv\Scripts\activate
 python main.py
 ```
+*   **Hệ thống sẽ tự khởi chạy song song:**
+    *   **Core API (8000)**: Xử lý Business Logic, MQTT, Dashboard.
+    *   **LPR API (8001)**: Xử lý AI, gọi `GET /capture` sang camera/điện thoại.
+*   *Lưu ý:* Nếu camera điện thoại offline, LPR sẽ tự động lấy ảnh trong `tests/image` làm mẫu.
 
-### 2. Terminal 2: Mock LPR (Port 8001)
-```powershell
-.\venv\Scripts\activate
-python tests/mock_lpr.py
-```
-
-### 3. Terminal 3: Mock Hardware (MQTT Test)
+### 2. Terminal 2: Test Interface (Mock HW)
 ```powershell
 .\venv\Scripts\activate
 python tests/mock_hw.py
 ```
 
 ---
-## 🛠 Quy trình Test hoàn chỉnh:
-1. **Xe vào**: Terminal 3 bấm **1**. Kiểm tra log Terminal 1 & 2.
-2. **Xe đỗ**: Terminal 3 bấm **3**. Kiểm tra Slot tại `http://localhost:8000/api/v1/parking-slots`.
-3. **Xe ra**: Terminal 3 bấm **2**. Xem `invoice_id` ở log Terminal 1.
-4. **Thanh toán**: Terminal 3 bấm **5**, dán `invoice_id` và `session_id` để mở Barrier.
+## 🛠 Các lệnh Test (Trong Terminal 2):
+*   **Bấm 1**: Xe VÀO. (Core gọi LPR chụp ảnh -> AI đọc biển số -> Lưu DB).
+*   **Bấm 2**: Xe RA. (Core gọi LPR -> Tính tiền dựa trên phí đã cấu hình).
+*   **Bấm 3/4**: Giả lập tình trạng Slot 1 (Đầu cảm biến IR của ESP32).
+*   **Bấm 5**: Xác nhận thanh toán xong (Để mở barrier cổng ra).
 
-**API Docs**: http://localhost:8000/docs
+## 📡 Tài liệu API:
+- **Swagger UI**: http://localhost:8000/docs

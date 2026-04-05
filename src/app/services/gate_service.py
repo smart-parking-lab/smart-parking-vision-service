@@ -4,46 +4,45 @@ from sqlalchemy.orm import Session
 from app.models.vehicle import Vehicle
 from app.models.parking_session import ParkingSession
 from app.models.invoice import Invoice
-from app.services.lpr_client import recognize_plate
+from app.services.lpr_client import recognize_plate # Quay lại dùng Client gọi API ngoài
 from app.services.pricing_service import calculate_fee
 from app.utils.logger import get_logger
 
 logger = get_logger("gate_service")
 
 async def handle_entry(db: Session, mqtt_client):
+    # Gọi API LPR bên ngoài
     lpr_result = await recognize_plate("entry")
-    plate = _extract_plate(lpr_result)
+    
+    plate = lpr_result.get("plate", "UNKNOWN") if lpr_result else "UNKNOWN"
     image_url = lpr_result.get("image_url") if lpr_result else None
 
-    logger.info(f"🚗 XE VÀO: plate={plate}")
+    logger.info(f"🚗 [Remote API] XE VÀO: plate={plate}")
 
     try:
         session = ParkingSession(
             plate_number=plate,
-            entry_time=datetime.now(timezone.utc), # Dùng UTC aware
+            entry_time=datetime.now(timezone.utc),
             status="active",
             entry_image_url=image_url,
         )
         db.add(session)
         db.commit()
-        db.refresh(session)
-        logger.info(f"✅ Đã tạo parking session: id={session.id}")
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ Lỗi DB khi xe vào: {e}")
+        logger.error(f"❌ Lỗi DB: {e}")
 
-    if lpr_result is not None:
-        mqtt_client.publish_gate_open("GATE_IN")
+    mqtt_client.publish_gate_open("GATE_IN")
 
 async def handle_exit(db: Session, mqtt_client):
+    # Gọi API LPR bên ngoài
     lpr_result = await recognize_plate("exit")
-    if lpr_result is None:
-        return
+    if not lpr_result: return
 
-    plate = _extract_plate(lpr_result)
+    plate = lpr_result.get("plate", "UNKNOWN")
     image_url = lpr_result.get("image_url")
 
-    logger.info(f"🚗 XE RA: plate={plate}")
+    logger.info(f"🚗 [Remote API] XE RA: plate={plate}")
 
     try:
         session = db.query(ParkingSession).filter(
@@ -52,18 +51,11 @@ async def handle_exit(db: Session, mqtt_client):
         ).order_by(ParkingSession.entry_time.desc()).first()
 
         if not session:
-            logger.warning(f"⚠️ Không có phiên active cho {plate}")
             mqtt_client.publish_gate_open("GATE_OUT")
             return
 
-        now = datetime.now(timezone.utc) # Dùng UTC aware
-        
-        # Đảm bảo session.entry_time cũng là aware trước khi trừ
-        entry_time = session.entry_time
-        if entry_time.tzinfo is None:
-            entry_time = entry_time.replace(tzinfo=timezone.utc)
-            
-        duration_minutes = (now - entry_time).total_seconds() / 60
+        now = datetime.now(timezone.utc)
+        duration_minutes = (now - session.entry_time.replace(tzinfo=timezone.utc)).total_seconds() / 60
         
         vehicle = db.query(Vehicle).filter(Vehicle.plate_number == plate).first()
         pricing_rule, amount = calculate_fee(db, vehicle, duration_minutes) if vehicle else (None, 5000.0)
@@ -83,15 +75,7 @@ async def handle_exit(db: Session, mqtt_client):
         db.add(invoice)
         db.commit()
         
-        logger.info(f"💰 Phí đỗ xe: {amount} VNĐ. Yêu cầu thanh toán cho invoice {invoice.id}")
         mqtt_client.publish_payment_request(str(session.id), str(invoice.id), str(int(amount)))
-        
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ Lỗi DB khi xe ra: {e}")
         mqtt_client.publish_gate_open("GATE_OUT")
-
-def _extract_plate(lpr_result: dict | None) -> str:
-    if lpr_result and lpr_result.get("plate"):
-        return lpr_result["plate"]
-    return f"UNKNOWN_{int(time.time())}"
