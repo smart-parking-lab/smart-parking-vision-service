@@ -7,7 +7,7 @@
 
 ```powershell
 cd E:\HocTap\AI\Doan\smart-parking-backend-core
-python -m venv venv
+python 3.11 -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
 ```
