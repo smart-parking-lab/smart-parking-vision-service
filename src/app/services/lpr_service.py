@@ -148,6 +148,19 @@ async def capture_image_from_camera() -> tuple[np.ndarray | None, bytes | None]:
                 return img, normalized_bytes
     except Exception as e:
         logger.error(f"⚠️ Không kết nối được Camera: {e}")
+    
+    # HỖ TRỢ OFFLINE MOCK: Tự động dùng lại ảnh đã chụp trong storage/captures nếu không kết nối được camera
+    try:
+        captures_dir = os.path.join("storage", "captures")
+        if os.path.exists(captures_dir):
+            files = [f for f in os.listdir(captures_dir) if f.lower().endswith((".jpg", ".png"))]
+            if files:
+                fallback_file = os.path.join(captures_dir, files[0])
+                logger.info(f"🔄 CHẾ ĐỘ THỬ NGHIỆM OFFLINE: Tự động dùng ảnh cũ làm mẫu: {fallback_file}")
+                return load_image_from_path(fallback_file)
+    except Exception as fallback_err:
+        logger.error(f"❌ Không thể load ảnh giả lập offline: {fallback_err}")
+
     return None, None
 
 
