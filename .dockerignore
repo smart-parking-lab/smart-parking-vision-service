@@ -1,0 +1,31 @@
+# Loại bỏ môi trường ảo cục bộ
+.venv/
+venv/
+env/
+ENV/
+
+# Loại bỏ python cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache/
+.ruff_cache/
+
+# Loại bỏ các file log cục bộ
+*.log
+npm-debug.log*
+
+# Loại bỏ Git và cấu hình IDE
+.git
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+
+# Loại bỏ các tệp tin lưu trữ ảnh/dữ liệu test cục bộ
+storage/
+*.png
+*.jpg
+*.jpeg
+.env
