@@ -1,5 +1,6 @@
 import os
-from fastapi import APIRouter, HTTPException
+import uuid
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from app.services.lpr_service import (
@@ -7,7 +8,11 @@ from app.services.lpr_service import (
     load_image_from_path,
     recognize_plate,
 )
-from app.services.storage_service import save_image
+from app.services.storage_service import (
+    save_image,
+    generate_cloudinary_url,
+    save_image_in_background,
+)
 from app.core.config import IMAGE_DIR
 from app.utils.logger import get_logger
 
@@ -23,10 +28,10 @@ class LocalImageRequest(BaseModel):
 
 
 @router.post("/camera")
-async def recognize_from_camera():
+async def recognize_from_camera(background_tasks: BackgroundTasks):
     """
     API 1: Gọi trực tiếp đến camera chụp ảnh → nhận diện biển số.
-    Ảnh được lưu local vào thư mục storage/captures.
+    Ảnh được sinh trước URL Cloudinary/local và lưu chạy ngầm.
     """
     img, raw_bytes = await capture_image_from_camera()
     if img is None:
@@ -34,7 +39,10 @@ async def recognize_from_camera():
 
     plate = recognize_plate(img)
 
-    image_url = save_image(raw_bytes)
+    image_uuid = str(uuid.uuid4())
+    image_url = generate_cloudinary_url(image_uuid)
+
+    background_tasks.add_task(save_image_in_background, raw_bytes, image_uuid)
 
     return {
         "plate": plate,
@@ -43,7 +51,7 @@ async def recognize_from_camera():
 
 
 @router.post("/local")
-async def recognize_from_local(payload: LocalImageRequest):
+async def recognize_from_local(payload: LocalImageRequest, background_tasks: BackgroundTasks):
     """
     API 2: Lấy ảnh từ local trong máy để nhận diện biển số.
     Truyền file_path (đường dẫn tuyệt đối) hoặc file_name (tên file trong thư mục IMAGE_DIR).
@@ -67,7 +75,10 @@ async def recognize_from_local(payload: LocalImageRequest):
 
     plate = recognize_plate(img)
 
-    image_url = save_image(raw_bytes)
+    image_uuid = str(uuid.uuid4())
+    image_url = generate_cloudinary_url(image_uuid)
+
+    background_tasks.add_task(save_image_in_background, raw_bytes, image_uuid)
 
     return {
         "plate": plate,

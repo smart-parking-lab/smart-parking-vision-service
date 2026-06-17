@@ -58,3 +58,54 @@ def save_image(image_bytes: bytes, folder: str = "captures") -> str | None:
     except Exception as e:
         logger.error(f"❌ Lỗi khi fallback lưu local: {e}")
         return None
+
+
+def generate_cloudinary_url(image_uuid: str, folder: str = "captures") -> str:
+    """
+    Sinh trước URL dự kiến. Ưu tiên Cloudinary nếu được cấu hình,
+    ngược lại fallback về đường dẫn local.
+    """
+    if CLOUDINARY_CLOUD_NAME:
+        return f"https://res.cloudinary.com/{CLOUDINARY_CLOUD_NAME}/image/upload/{folder}/{image_uuid}.jpg"
+    return f"storage/{folder}/{image_uuid}.jpg"
+
+
+def save_image_in_background(image_bytes: bytes, image_uuid: str, folder: str = "captures") -> None:
+    """
+    Thực hiện ghi ảnh xuống disk local và upload lên Cloudinary chạy ngầm.
+    """
+    if not image_bytes:
+        return
+
+    # 1. Luôn lưu local làm backup và phục vụ môi trường dev local không Cloudinary
+    try:
+        save_dir = Path("storage") / folder
+        save_dir.mkdir(parents=True, exist_ok=True)
+        file_path = save_dir / f"{image_uuid}.jpg"
+        file_path.write_bytes(image_bytes)
+        logger.info(f"💾 [Chạy ngầm] Đã lưu ảnh local: {file_path.as_posix()}")
+    except Exception as e:
+        logger.error(f"❌ [Chạy ngầm] Lỗi lưu local: {e}")
+
+    # 2. Upload lên Cloudinary nếu có cấu hình đầy đủ
+    if CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
+        try:
+            cloudinary.config(
+                cloud_name=CLOUDINARY_CLOUD_NAME,
+                api_key=CLOUDINARY_API_KEY,
+                api_secret=CLOUDINARY_API_SECRET,
+                secure=True,
+            )
+            result = cloudinary.uploader.upload(
+                image_bytes,
+                folder=folder,
+                public_id=image_uuid,
+                resource_type="image",
+            )
+            image_url = result.get("secure_url")
+            if image_url:
+                logger.info(f"☁️ [Chạy ngầm] Đã upload ảnh Cloudinary: {image_url}")
+            else:
+                logger.warning("⚠️ [Chạy ngầm] Cloudinary không trả về secure_url")
+        except Exception as e:
+            logger.error(f"❌ [Chạy ngầm] Lỗi upload Cloudinary: {e}")
