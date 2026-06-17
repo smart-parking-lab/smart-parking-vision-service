@@ -38,7 +38,11 @@ async def recognize_from_camera(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=502, detail="Không thể chụp ảnh từ camera")
 
     plate = recognize_plate(img)
-
+    if plate == "UNKNOWN":
+        raise HTTPException(
+            status_code=422,
+            detail="Không nhận diện được biển số xe"
+        )
     image_uuid = str(uuid.uuid4())
     image_url = generate_cloudinary_url(image_uuid)
 
@@ -74,7 +78,11 @@ async def recognize_from_local(payload: LocalImageRequest, background_tasks: Bac
         )
 
     plate = recognize_plate(img)
-
+    if plate == "UNKNOWN":
+        raise HTTPException(
+            status_code=422,
+            detail="Không nhận diện được biển số xe"
+        )
     image_uuid = str(uuid.uuid4())
     image_url = generate_cloudinary_url(image_uuid)
 
